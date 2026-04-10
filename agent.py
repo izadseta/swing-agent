@@ -6,60 +6,99 @@ and sends Telegram alerts so you manually execute.
 
 import os
 import json
-from dotenv import load_dotenv
-load_dotenv('/Users/mohammadizadseta/Desktop/swing-agent/.env')
-import asyncio
 import requests
 import pandas as pd
 import ta
 import yfinance as yf
 from datetime import datetime
 from anthropic import Anthropic
+from dotenv import load_dotenv
 
-# ── CONFIG ─────────────────────────────────────────────────────────────────
-# Copy .env.example to .env and fill in your keys
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "your-claude-api-key")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "your-telegram-bot-token")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "your-chat-id")
+# ── CONFIG ──────────────────────────────────────────────────────────────────
 
-# Stocks to watch — add/remove tickers freely
-# TSX stocks: append .TO (e.g. SHOP.TO, RY.TO, ENB.TO)
-# US stocks: plain ticker (e.g. NVDA, AAPL, AMD)
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
 WATCHLIST = [
-    "NVDA", "AMD", "AAPL", "MSFT",   # US tech
-    "SHOP.TO", "RY.TO", "CNQ.TO", "ENB.TO", "VFV.TO", "COST.TO", "XEI.TO"    # Canadian
+    # US stocks
+    "NVDA",   # NVIDIA — AI/chips
+    "AMD",    # AMD — follows NVDA
+    "AAPL",   # Apple — stable signals
+    "MSFT",   # Microsoft — steady trend
+    "META",   # Meta — strong momentum
+    "TSLA",   # Tesla — high volatility
+    "AMZN",   # Amazon — broad indicator
+    "AVGO",   # Broadcom — AI/chips
+    "COST",   # Costco — defensive growth
+    "VOO",    # Vanguard S&P 500 ETF (US)
+    # Canadian stocks — execute manually in Wealthsimple
+    "SHOP.TO",  # Shopify — tech
+    "ENB.TO",   # Enbridge — pipeline
+    "SU.TO",    # Suncor — oil
+    "CNQ.TO",   # Canadian Natural Resources
+    "RY.TO",    # Royal Bank
+    "TD.TO",    # TD Bank
+    "BNS.TO",   # Scotiabank
+    "BMO.TO",   # Bank of Montreal
+    "CM.TO",    # CIBC
+    "CNR.TO",   # CN Rail
+    "CP.TO",    # CP Rail
+    "MDA.TO",   # MDA Space — tech
+    "ABX.TO",   # Barrick Gold
+    "WPM.TO",   # Wheaton Precious Metals
+    "BCE.TO",   # BCE Telecom
+    # Canadian ETFs
+    "VFV.TO",   # Vanguard S&P 500 CAD
+    "ZSP.TO",   # BMO S&P 500 CAD
+    "XIU.TO",   # iShares TSX 60
+    "XIC.TO",   # iShares TSX Composite
+    "VCN.TO",   # Vanguard Canada All Cap
+    "HXT.TO",   # Horizons TSX 60
+    "XEQT.TO",  # iShares All-Equity Portfolio
+    "VEQT.TO",  # Vanguard All-Equity Portfolio
+    "VDY.TO",   # Vanguard Canadian High Dividend
+    "ZWC.TO",   # BMO High Dividend Covered Call
+    "ZWB.TO",   # BMO Canadian Banks Covered Call
+    "ZAG.TO",   # BMO Aggregate Bond
+    "VBG.TO",   # Vanguard Global Bond CAD-hedged
+    "VUN.TO",   # Vanguard US Total Market CAD
+    "QQC.TO",   # Invesco NASDAQ 100 CAD
 ]
 
-# Risk settings
-MAX_POSITION_PCT = 10     # Never suggest more than 10% of portfolio per trade
-STOP_LOSS_PCT = 5         # Suggest stop-loss 5% below entry
-TAKE_PROFIT_PCT = 12      # Suggest take-profit 12% above entry
+MAX_POSITION_PCT = 10
+STOP_LOSS_PCT = 5
+TAKE_PROFIT_PCT = 12
 
-# ── MARKET DATA ─────────────────────────────────────────────────────────────
+# ── MARKET DATA ──────────────────────────────────────────────────────────────
 
 def fetch_stock_data(ticker: str, period: str = "3mo") -> pd.DataFrame:
-    """Pull OHLCV data + technical indicators via yfinance."""
     df = yf.download(ticker, period=period, interval="1d", progress=False)
     if df.empty:
         return df
 
-    # Flatten MultiIndex columns if present
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
 
-    # Technical indicators
-    df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=14).rsi()
-    bb = ta.volatility.BollingerBands(df["Close"], window=20)
+    close = df["Close"]
+    high = df["High"]
+    low = df["Low"]
+
+    df["RSI"] = ta.momentum.RSIIndicator(close, window=14).rsi()
+
+    bb = ta.volatility.BollingerBands(close, window=20)
     df["BBU_20"] = bb.bollinger_hband()
     df["BBL_20"] = bb.bollinger_lband()
     df["BBM_20"] = bb.bollinger_mavg()
-    df["ATR"] = ta.volatility.AverageTrueRange(df["High"], df["Low"], df["Close"], window=14).average_true_range()
-    macd = ta.trend.MACD(df["Close"])
+
+    df["ATR"] = ta.volatility.AverageTrueRange(high, low, close, window=14).average_true_range()
+
+    macd = ta.trend.MACD(close)
     df["MACD_12_26_9"] = macd.macd()
     df["MACDs_12_26_9"] = macd.macd_signal()
 
-    # Volume spike (vs 20-day avg)
     df["Vol_Avg20"] = df["Volume"].rolling(20).mean()
     df["Vol_Spike"] = df["Volume"] / df["Vol_Avg20"]
 
@@ -67,22 +106,29 @@ def fetch_stock_data(ticker: str, period: str = "3mo") -> pd.DataFrame:
 
 
 def build_signal_summary(ticker: str, df: pd.DataFrame) -> dict:
-    """Extract the last few days of signals into a clean dict for Claude."""
     if df.empty or len(df) < 5:
         return {}
 
     last = df.iloc[-1]
     prev = df.iloc[-2]
 
-    # Find Bollinger Band column names dynamically
-    bb_upper = next((c for c in df.columns if "BBU" in c), None)
-    bb_lower = next((c for c in df.columns if "BBL" in c), None)
-    bb_mid   = next((c for c in df.columns if "BBM" in c), None)
-    macd_col = next((c for c in df.columns if c.startswith("MACD_") and "s" not in c.lower() and "h" not in c.lower()), None)
-    macd_sig = next((c for c in df.columns if "MACDs" in c), None)
-
     price = float(last["Close"])
     price_change_5d = (price - float(df.iloc[-5]["Close"])) / float(df.iloc[-5]["Close"]) * 100
+
+    bb_upper = float(last["BBU_20"])
+    bb_lower = float(last["BBL_20"])
+    bb_mid   = float(last["BBM_20"])
+    macd_val = float(last["MACD_12_26_9"])
+    macd_sig = float(last["MACDs_12_26_9"])
+    prev_macd = float(prev["MACD_12_26_9"])
+    prev_sig  = float(prev["MACDs_12_26_9"])
+
+    if macd_val > macd_sig and prev_macd <= prev_sig:
+        crossover = "bullish"
+    elif macd_val < macd_sig and prev_macd >= prev_sig:
+        crossover = "bearish"
+    else:
+        crossover = "none"
 
     return {
         "ticker": ticker,
@@ -92,26 +138,17 @@ def build_signal_summary(ticker: str, df: pd.DataFrame) -> dict:
         "ATR": round(float(last["ATR"]), 2),
         "ATR_pct_of_price": round(float(last["ATR"]) / price * 100, 2),
         "volume_spike_ratio": round(float(last["Vol_Spike"]), 2),
-        "bb_upper": round(float(last[bb_upper]), 2) if bb_upper else None,
-        "bb_lower": round(float(last[bb_lower]), 2) if bb_lower else None,
-        "bb_mid":   round(float(last[bb_mid]), 2)   if bb_mid   else None,
+        "bb_upper": round(bb_upper, 2),
+        "bb_lower": round(bb_lower, 2),
+        "bb_mid":   round(bb_mid, 2),
         "price_vs_bb": (
-            "above_upper" if bb_upper and price > float(last[bb_upper]) else
-            "below_lower" if bb_lower and price < float(last[bb_lower]) else
+            "above_upper" if price > bb_upper else
+            "below_lower" if price < bb_lower else
             "inside_bands"
         ),
-        "macd": round(float(last[macd_col]), 4) if macd_col else None,
-        "macd_signal": round(float(last[macd_sig]), 4) if macd_sig else None,
-        "macd_crossover": (
-            "bullish" if macd_col and macd_sig and
-            float(last[macd_col]) > float(last[macd_sig]) and
-            float(prev[macd_col]) <= float(prev[macd_sig])
-            else
-            "bearish" if macd_col and macd_sig and
-            float(last[macd_col]) < float(last[macd_sig]) and
-            float(prev[macd_col]) >= float(prev[macd_sig])
-            else "none"
-        ),
+        "macd": round(macd_val, 4),
+        "macd_signal": round(macd_sig, 4),
+        "macd_crossover": crossover,
         "as_of": str(df.index[-1].date()),
     }
 
@@ -126,9 +163,9 @@ Your job:
 3. Only alert on high-conviction setups — avoid noise
 
 Swing trade criteria to look for:
-- BUY signals: RSI 30-50 recovering, price near or bouncing off BB lower, bullish MACD crossover, volume spike confirming move, ATR showing reasonable volatility
-- SELL/EXIT signals: RSI >70 (overbought), price touching BB upper, bearish MACD crossover, extended run without pullback
-- NO_ACTION: mixed signals, no clear setup, RSI in neutral zone with no crossover
+- BUY signals: RSI 30-50 recovering, price near or bouncing off BB lower, bullish MACD crossover, volume spike confirming move
+- SELL/EXIT signals: RSI >70 (overbought), price touching BB upper, bearish MACD crossover
+- NO_ACTION: mixed signals, no clear setup
 
 Always output valid JSON only — no markdown, no extra text:
 {
@@ -143,9 +180,7 @@ Always output valid JSON only — no markdown, no extra text:
 
 
 def analyze_with_claude(signal: dict) -> dict:
-    """Send signals to Claude and get a structured trade decision."""
     client = Anthropic(api_key=ANTHROPIC_API_KEY)
-
     prompt = f"""Analyze this swing trade setup and return your JSON decision:
 
 {json.dumps(signal, indent=2)}
@@ -160,7 +195,6 @@ Only flag HIGH conviction if 3+ signals align."""
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": prompt}]
     )
-
     raw = response.content[0].text.strip()
     return json.loads(raw)
 
@@ -168,19 +202,16 @@ Only flag HIGH conviction if 3+ signals align."""
 # ── TELEGRAM ALERTS ──────────────────────────────────────────────────────────
 
 def send_telegram(message: str):
-    """Send a formatted message to your Telegram chat."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
+    r = requests.post(url, json={
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message,
         "parse_mode": "HTML"
-    }
-    r = requests.post(url, json=payload, timeout=10)
+    }, timeout=10)
     return r.ok
 
 
 def format_alert(signal: dict, decision: dict) -> str:
-    """Format a clean Telegram message."""
     ticker = signal["ticker"]
     action = decision["action"]
     conviction = decision["conviction"]
@@ -196,9 +227,9 @@ def format_alert(signal: dict, decision: dict) -> str:
         return ""
 
     entry = decision.get("entry_price") or price
-    sl = decision.get("stop_loss") or round(price * (1 - STOP_LOSS_PCT/100), 2)
-    tp = decision.get("take_profit") or round(price * (1 + TAKE_PROFIT_PCT/100), 2)
-    risk_reward = round((tp - entry) / (entry - sl), 1) if entry != sl else "N/A"
+    sl = decision.get("stop_loss") or round(price * (1 - STOP_LOSS_PCT / 100), 2)
+    tp = decision.get("take_profit") or round(price * (1 + TAKE_PROFIT_PCT / 100), 2)
+    rr = round((tp - entry) / (entry - sl), 1) if entry != sl else "N/A"
 
     lines = [
         f"{emoji} <b>{action_text} — {ticker}</b> [{conviction} conviction]",
@@ -207,7 +238,7 @@ def format_alert(signal: dict, decision: dict) -> str:
         f"<b>Entry:</b> ~${entry}",
         f"<b>Stop-loss:</b> ${sl} ({STOP_LOSS_PCT}% risk)",
         f"<b>Take-profit:</b> ${tp} ({TAKE_PROFIT_PCT}% target)",
-        f"<b>Risk/Reward:</b> 1:{risk_reward}",
+        f"<b>Risk/Reward:</b> 1:{rr}",
         f"",
         f"<b>Why:</b> {decision['reasoning']}",
         f"",
@@ -218,14 +249,12 @@ def format_alert(signal: dict, decision: dict) -> str:
         f"⚠️ <i>This is analysis only — execute manually in Wealthsimple.</i>",
         f"<i>Max position: {MAX_POSITION_PCT}% of portfolio.</i>",
     ]
-
     return "\n".join(lines)
 
 
-# ── MAIN LOOP ────────────────────────────────────────────────────────────────
+# ── MAIN ─────────────────────────────────────────────────────────────────────
 
 def run_scan():
-    """Scan all watchlist tickers and send alerts for actionable setups."""
     print(f"\n{'='*50}")
     print(f"Swing Agent scan — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"{'='*50}")
@@ -237,12 +266,12 @@ def run_scan():
         try:
             df = fetch_stock_data(ticker)
             if df.empty:
-                print(f"  No data for {ticker}, skipping.")
+                print(f"  No data, skipping.")
                 continue
 
             signal = build_signal_summary(ticker, df)
             if not signal:
-                print(f"  Not enough data for {ticker}, skipping.")
+                print(f"  Not enough data, skipping.")
                 continue
 
             print(f"  RSI={signal['RSI']} | ATR%={signal['ATR_pct_of_price']} | Vol spike={signal['volume_spike_ratio']}x | {signal['price_vs_bb']}")
@@ -250,10 +279,8 @@ def run_scan():
             decision = analyze_with_claude(signal)
             action = decision.get("action", "NO_ACTION")
             conviction = decision.get("conviction", "LOW")
-
             print(f"  Claude says: {action} [{conviction}]")
 
-            # Only alert on medium/high conviction
             if action != "NO_ACTION" and conviction in ("HIGH", "MEDIUM"):
                 message = format_alert(signal, decision)
                 if message:
