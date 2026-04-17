@@ -1,1 +1,6 @@
-
+anthropic
+yfinance
+pandas
+requests
+puthon-dotenv
+ta
