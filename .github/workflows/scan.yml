@@ -1,27 +1,26 @@
-name: Swing Agent Daily Scan
+name: Swing Agent v3
 
 on:
   schedule:
-    - cron: '0 12 * * 1-5'  # 8 AM Toronto, weekdays only
-  workflow_dispatch:          # allows manual run anytime
+    - cron: '30 12 * * 1-5'  # 8:30 AM Toronto, weekdays only
+  workflow_dispatch:           # manual run anytime
 
 jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-
-      - name: Install libraries
-        run: pip install anthropic yfinance pandas requests python-dotenv ta
-
+      - run: pip install anthropic yfinance pandas requests python-dotenv ta
       - name: Run agent
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          EMAIL_SENDER:       ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD:     ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECIPIENT:    ${{ secrets.EMAIL_RECIPIENT }}
+          FINNHUB_API_KEY:    ${{ secrets.FINNHUB_API_KEY }}
         run: python agent.py
