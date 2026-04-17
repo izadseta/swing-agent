@@ -2,5 +2,5 @@ anthropic
 yfinance
 pandas
 requests
-puthon-dotenv
+python-dotenv
 ta
