@@ -2,7 +2,7 @@ name: Swing Agent v3
 
 on:
   schedule:
-    - cron: '30 12 * * 1-5'  # 8:30 AM Toronto, weekdays only
+    - cron: '00 08 * * 1-5'  # 8:30 AM Toronto, weekdays only
   workflow_dispatch:           # manual run anytime
 
 jobs:
