@@ -106,6 +106,7 @@ WATCHLIST = [
 def fetch_stock_data(ticker: str, period: str = "3mo") -> pd.DataFrame:
     df = yf.download(ticker, period=period, interval="1d", progress=False)
     if df.empty:
+    print("skipping")
     continue
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
