@@ -216,7 +216,7 @@ Output JSON only:
 {{"action":"BUY_ALERT"|"SELL_ALERT"|"NO_ACTION","conviction":"HIGH"|"MEDIUM"|"LOW","reasoning":"2-3 sentences","entry_price":number|null,"stop_loss":number|null,"take_profit":number|null,"key_signals":["s1","s2"]}}"""
 
     response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-5",
         max_tokens=400,
         messages=[{"role": "user", "content": prompt}]
     )
@@ -258,7 +258,7 @@ For each pick give:
 Be specific and actionable like a real Wall Street trader. Max 300 words total."""
 
     response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-5",
         max_tokens=600,
         messages=[{"role": "user", "content": prompt}]
     )
@@ -275,7 +275,7 @@ def claude_news_briefing(headlines, alerts):
               "Write a 200-word pre-market briefing for a Canadian swing trader. "
               "Cover macro, TSX outlook, key risks today.")
     response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-5",
         max_tokens=400,
         messages=[{"role": "user", "content": prompt}]
     )
