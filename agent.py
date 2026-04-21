@@ -267,8 +267,7 @@ Be specific and actionable like a real Wall Street trader. Max 300 words total."
 
 def claude_news_briefing(headlines, alerts):
     client = Anthropic(api_key=ANTHROPIC_API_KEY)
-    alert_summary = (", ".join(f"{a['ticker']} ({a.get('action','')})" for a in alerts)
-                     if alerts else "none today")
+alert_summary = (", ".join(f"{a.get('ticker','?')} ({a.get('action','')})" for a in alerts)                     if alerts else "none today")
     prompt = (f"Date: {datetime.now().strftime('%A %B %d, %Y')}\n\n"
               f"Headlines:\n" + "\n".join(f"• {h}" for h in headlines)
               + f"\n\nSwing alerts: {alert_summary}\n\n"
