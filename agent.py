@@ -1,6 +1,6 @@
 """
 Swing Trade Agent v3 — Canada Edition
-Updated: Fixed IndentationError + Added Wall Street Daily 5 Picks
+Fixed: IndentationError, KeyError ticker, model updated
 """
 
 import os
@@ -27,8 +27,6 @@ EMAIL_PASSWORD     = os.getenv("EMAIL_PASSWORD")
 EMAIL_RECIPIENT    = os.getenv("EMAIL_RECIPIENT")
 FINNHUB_API_KEY    = os.getenv("FINNHUB_API_KEY", "")
 
-# ── RULES BY MARKET TYPE ─────────────────────────────────────────────────────
-
 CA_ETFS = {
     "VFV.TO","ZSP.TO","XIU.TO","XIC.TO","VCN.TO","HXT.TO",
     "XEQT.TO","VEQT.TO","VDY.TO","ZWC.TO","ZWB.TO","ZEB.TO",
@@ -43,8 +41,6 @@ def get_rules(ticker):
     else:
         return {"stop": 2.5, "target": 6.0, "label": "US Stock"}
 
-# ── WATCHLIST ─────────────────────────────────────────────────────────────────
-
 WATCHLIST = [
     "NVDA","AMD","AAPL","MSFT","META","TSLA","AMZN","AVGO","COST","SPY",
     "SHOP.TO","ENB.TO","SU.TO","CNQ.TO","RY.TO","TD.TO","BNS.TO",
@@ -52,8 +48,6 @@ WATCHLIST = [
     "BCE.TO","FTS.TO","XIU.TO","ZEB.TO","VFV.TO","QQC.TO","XEQT.TO",
     "VDY.TO","ZWC.TO","XIC.TO","VCN.TO",
 ]
-
-# ── MARKET DATA ───────────────────────────────────────────────────────────────
 
 def fetch_stock_data(ticker, period="3mo"):
     try:
@@ -160,8 +154,6 @@ def build_signal(ticker, df):
         return {}
 
 
-# ── NEWS ──────────────────────────────────────────────────────────────────────
-
 def fetch_market_news():
     headlines = []
     if FINNHUB_API_KEY:
@@ -198,8 +190,6 @@ def fetch_market_news():
     return [h for h in headlines if h][:20]
 
 
-# ── CLAUDE AI ─────────────────────────────────────────────────────────────────
-
 def analyze_with_claude(signal):
     client = Anthropic(api_key=ANTHROPIC_API_KEY)
     prompt = f"""Analyze this 1-3 day swing trade for a Canadian investor:
@@ -213,7 +203,7 @@ Sell signals: {', '.join(signal['sell_signals']) or 'none'}
 Stop: ${signal['stop']} (-{signal['stop_pct']}%) | Target: ${signal['target']} (+{signal['target_pct']}%)
 
 Output JSON only:
-{{"action":"BUY_ALERT"|"SELL_ALERT"|"NO_ACTION","conviction":"HIGH"|"MEDIUM"|"LOW","reasoning":"2-3 sentences","entry_price":number|null,"stop_loss":number|null,"take_profit":number|null,"key_signals":["s1","s2"]}}"""
+{{"action":"BUY_ALERT"|"SELL_ALERT"|"NO_ACTION","conviction":"HIGH"|"MEDIUM"|"LOW","reasoning":"2-3 sentences","entry_price":0,"stop_loss":0,"take_profit":0,"key_signals":["s1","s2"]}}"""
 
     response = client.messages.create(
         model="claude-sonnet-4-5",
@@ -225,37 +215,23 @@ Output JSON only:
 
 
 def claude_daily_picks(headlines, all_signals):
-    """Wall Street specialist picks top 5 Canadian stocks/ETFs for today."""
     client = Anthropic(api_key=ANTHROPIC_API_KEY)
-
     signals_summary = "\n".join(
-        f"- {s['ticker']}: price ${s['price']}, RSI {s['RSI']}, "
-        f"vol {s['vol_spike']}x, score {s['buy_score']}/5, {s['price_vs_bb']}"
+        f"- {s['ticker']}: ${s['price']}, RSI {s['RSI']}, vol {s['vol_spike']}x, score {s['buy_score']}/5"
         for s in all_signals[:20]
     )
+    prompt = f"""You are a Wall Street specialist with 20 years in Canadian markets.
+Today: {datetime.now().strftime('%A, %B %d, %Y')}
 
-    prompt = f"""You are a Wall Street specialist with 20 years experience in Canadian markets.
-Today is {datetime.now().strftime('%A, %B %d, %Y')}.
-
-Today's market headlines:
+Headlines:
 {chr(10).join(f'• {h}' for h in headlines[:10])}
 
-Technical data scanned today:
+Technical data:
 {signals_summary}
 
-Pick the TOP 5 Canadian stocks or ETFs for swing trading TODAY.
-Consider: technical momentum, news catalysts, sector strength, risk/reward.
-Focus on TSX-listed stocks and Canadian ETFs.
-
-For each pick give:
-1. Ticker
-2. Why today specifically
-3. Entry zone
-4. Stop loss
-5. Target
-6. Expected hold: 1-3 days
-
-Be specific and actionable like a real Wall Street trader. Max 300 words total."""
+Pick TOP 5 Canadian stocks or ETFs for swing trading TODAY.
+For each: ticker, why today, entry zone, stop loss, target, hold 1-3 days.
+Be specific. Max 300 words."""
 
     response = client.messages.create(
         model="claude-sonnet-4-5",
@@ -267,12 +243,21 @@ Be specific and actionable like a real Wall Street trader. Max 300 words total."
 
 def claude_news_briefing(headlines, alerts):
     client = Anthropic(api_key=ANTHROPIC_API_KEY)
-alert_summary = (", ".join(f"{a.get('ticker','?')} ({a.get('action','')})" for a in alerts)                     if alerts else "none today")
-    prompt = (f"Date: {datetime.now().strftime('%A %B %d, %Y')}\n\n"
-              f"Headlines:\n" + "\n".join(f"• {h}" for h in headlines)
-              + f"\n\nSwing alerts: {alert_summary}\n\n"
-              "Write a 200-word pre-market briefing for a Canadian swing trader. "
-              "Cover macro, TSX outlook, key risks today.")
+    if alerts:
+        alert_summary = ", ".join(
+            f"{a.get('ticker', '?')} ({a.get('action', '')})"
+            for a in alerts
+        )
+    else:
+        alert_summary = "none today"
+
+    prompt = (
+        f"Date: {datetime.now().strftime('%A %B %d, %Y')}\n\n"
+        f"Headlines:\n" + "\n".join(f"• {h}" for h in headlines) +
+        f"\n\nSwing alerts: {alert_summary}\n\n"
+        "Write a 200-word pre-market briefing for a Canadian swing trader. "
+        "Cover macro, TSX outlook, key risks today."
+    )
     response = client.messages.create(
         model="claude-sonnet-4-5",
         max_tokens=400,
@@ -280,8 +265,6 @@ alert_summary = (", ".join(f"{a.get('ticker','?')} ({a.get('action','')})" for a
     )
     return response.content[0].text.strip()
 
-
-# ── TELEGRAM ──────────────────────────────────────────────────────────────────
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -328,8 +311,6 @@ def format_alert(signal, decision):
     return "\n".join(lines)
 
 
-# ── EMAIL ─────────────────────────────────────────────────────────────────────
-
 def send_email(subject, html):
     if not all([EMAIL_SENDER, EMAIL_PASSWORD, EMAIL_RECIPIENT]):
         print("  Email not configured")
@@ -343,7 +324,7 @@ def send_email(subject, html):
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
             s.login(EMAIL_SENDER, EMAIL_PASSWORD)
             s.sendmail(EMAIL_SENDER, EMAIL_RECIPIENT, msg.as_string())
-        print(f"  Email sent → {EMAIL_RECIPIENT}")
+        print(f"  Email sent to {EMAIL_RECIPIENT}")
     except Exception as e:
         print(f"  Email error: {e}")
 
@@ -366,7 +347,7 @@ def build_email(briefing, picks, alerts):
           <td style="padding:8px 12px;font-weight:700;color:{color}">{sig.get('ticker','')}</td>
           <td style="padding:8px 12px;color:{color}">{label}</td>
           <td style="padding:8px 12px">{dec.get('conviction','')}</td>
-          <td style="padding:8px 12px;font-size:12px">{sig.get('buy_score',0)}/5 signals</td>
+          <td style="padding:8px 12px;font-size:12px">{sig.get('buy_score',0)}/5</td>
           <td style="padding:8px 12px;font-size:12px">Entry ${dec.get('entry_price') or sig.get('price','')} | Stop ${sig.get('stop','')} | TP ${sig.get('target','')}</td>
           <td style="padding:8px 12px;font-size:11px">{dec.get('reasoning','')[:80]}...</td>
         </tr>"""
@@ -384,17 +365,14 @@ def build_email(briefing, picks, alerts):
     <div style="font-size:13px;color:#7db3d8;margin-top:4px">{date_str}</div>
   </div>
   <div style="padding:26px 30px">
-
     <h2 style="font-size:17px;font-weight:600;margin:0 0 14px;color:#111;border-bottom:2px solid #eee;padding-bottom:8px">🌍 Pre-Market Briefing</h2>
     <div style="background:#f8f8f8;border-left:4px solid #0d2137;border-radius:0 8px 8px 0;padding:14px 18px;font-size:14px;line-height:1.8;color:#333">
       <p style="margin:0">{news_html}</p>
     </div>
-
     <h2 style="font-size:17px;font-weight:600;margin:26px 0 14px;color:#111;border-bottom:2px solid #eee;padding-bottom:8px">⭐ Wall Street Top 5 Canadian Picks Today</h2>
     <div style="background:#fff8e1;border-left:4px solid #f59e0b;border-radius:0 8px 8px 0;padding:14px 18px;font-size:14px;line-height:1.8;color:#333">
       <p style="margin:0">{picks_html}</p>
     </div>
-
     <h2 style="font-size:17px;font-weight:600;margin:26px 0 14px;color:#111;border-bottom:2px solid #eee;padding-bottom:8px">📡 Swing Trade Alerts</h2>
     <table style="width:100%;border-collapse:collapse;font-size:13px">
       <tr style="background:#f0f0f0">
@@ -407,7 +385,6 @@ def build_email(briefing, picks, alerts):
       </tr>
       {rows}
     </table>
-
   </div>
   <div style="background:#f5f5f5;padding:12px 30px;font-size:11px;color:#999;border-top:1px solid #eee;text-align:center">
     Swing Agent v3 · Execute manually in Wealthsimple · Not financial advice · {datetime.now().strftime('%H:%M ET')}
@@ -416,15 +393,12 @@ def build_email(briefing, picks, alerts):
 </body></html>"""
 
 
-# ── MAIN ──────────────────────────────────────────────────────────────────────
-
 def run():
     print(f"\n{'='*55}")
     print(f"  SWING AGENT v3 — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"  Scanning {len(WATCHLIST)} stocks...")
     print(f"{'='*55}")
 
-    # 1. Scan all stocks
     alerts_sent = 0
     all_alerts  = []
     all_signals = []
@@ -458,31 +432,25 @@ def run():
 
     print(f"\n  Scan done — {alerts_sent} alert(s)")
 
-    # 2. News
     print("  Fetching news...")
     headlines = fetch_market_news()
 
-    # 3. Wall Street Top 5 Picks
     print("  Generating Wall Street picks...")
     picks = claude_daily_picks(headlines, all_signals)
-
-    # 4. Send picks to Telegram
-    picks_msg = f"⭐ <b>Wall Street Top 5 Canadian Picks — {datetime.now().strftime('%b %d')}</b>\n\n{picks}"
+    picks_msg = f"⭐ <b>Wall Street Top 5 — {datetime.now().strftime('%b %d')}</b>\n\n{picks}"
     send_telegram(picks_msg)
 
-    # 5. Summary if no alerts
     if alerts_sent == 0:
         send_telegram(
             f"📊 <b>Swing Agent scan complete</b> — {datetime.now().strftime('%b %d %H:%M')}\n"
             f"No high-conviction setups across {len(WATCHLIST)} stocks today.\n"
-            f"<i>See Wall Street picks above + full report in email.</i>"
+            f"<i>See Wall Street picks above.</i>"
         )
 
-    # 6. News briefing
     print("  Writing briefing...")
-    briefing = claude_news_briefing(headlines, [a["decision"] for a in all_alerts])
+    alert_decisions = [a["decision"] for a in all_alerts]
+    briefing = claude_news_briefing(headlines, alert_decisions)
 
-    # 7. Email
     print("  Sending email...")
     subject = f"📈 Swing Agent — {datetime.now().strftime('%b %d %Y')} pre-market"
     html    = build_email(briefing, picks, all_alerts)
