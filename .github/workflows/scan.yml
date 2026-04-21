@@ -2,15 +2,15 @@ name: Swing Agent v3
 
 on:
   schedule:
-    - cron: '00 08 * * 1-5'  # 8:30 AM Toronto, weekdays only
-  workflow_dispatch:           # manual run anytime
+    - cron: '30 12 * * 1-5'  # 8:30 AM Toronto, weekdays
+  workflow_dispatch:
 
 jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - run: pip install anthropic yfinance pandas requests python-dotenv ta
